@@ -5,7 +5,7 @@ const { assert, expect } = require("chai")
 !developmentChains.includes(network.name)
   ? describe.skip
   : describe("Lottery Unit Tests", () => {
-      let lottery, entranceFee, deployer, interval, accounts, players
+      let lottery, entranceFee, deployer, interval, accounts
       const chainId = network.config.chainId
 
       beforeEach(async () => {
@@ -57,16 +57,28 @@ const { assert, expect } = require("chai")
             lottery = lottery.connect(accounts[0])
             await lottery.openLottery()
           })
+
           it("revert when you don't pay enough", async () => {
             await expect(lottery.enterLottery()).to.be.revertedWith("Lottery__NotEnoughEthEntered")
           })
+
           it("records players when they enter", async () => {
             await lottery.enterLottery({ value: entranceFee })
             const playerFromContract = await lottery.getPlayer(0)
             assert.equal(playerFromContract, deployer)
           })
 
-          it("emits event on enter", async () => {
+          it("records player entries", async () => {
+            const player = accounts[1]
+            lottery = lottery.connect(player)
+            const round = await lottery.getRound()
+            await lottery.enterLottery({ value: entranceFee })
+            await lottery.enterLottery({ value: entranceFee })
+            const entries = await lottery.getPlayerEntries(Number(round), player.address)
+            assert.equal(entries, Number(2))
+          })
+
+          it("emits an event on enter", async () => {
             await expect(lottery.enterLottery({ value: entranceFee })).to.emit(
               lottery,
               "LotteryEnter"
@@ -97,10 +109,7 @@ const { assert, expect } = require("chai")
         })
 
         it("emits event on close", async () => {
-          const tx = await lottery.closeLottery()
-          const txReceipt = await tx.wait(1)
-          const state = txReceipt.events[0].args.state
-          assert.equal(state, 2)
+          await expect(lottery.closeLottery()).to.emit(lottery, "LotteryClose")
         })
       })
 
@@ -120,7 +129,7 @@ const { assert, expect } = require("chai")
           assert(value === false)
         })
 
-        it("returns false if enough haven't time hasn't passed", async () => {
+        it("returns false if time hasn't passed", async () => {
           lottery = lottery.connect(accounts[0])
           await lottery.openLottery()
           await lottery.enterLottery({ value: entranceFee })
@@ -166,6 +175,8 @@ const { assert, expect } = require("chai")
           await expect(lottery.requestWinner()).to.be.revertedWith("Lottery__PickWinnerNotNeeded")
         })
         it("picks a winner, resets, and sends money", async () => {
+          const round = Number(await lottery.getRound())
+
           for (let index = 1; index <= 11; index++) {
             lottery = lottery.connect(accounts[index])
             await lottery.enterLottery({ value: entranceFee })
@@ -175,8 +186,6 @@ const { assert, expect } = require("chai")
           lottery = lottery.connect(accounts[0])
 
           const startingTimeStamp = await lottery.getLatestTimeStamp() // stores starting timestamp (before we fire our event)
-          const lotteryStartingBalance = await lottery.getBalance()
-
           let startingBalances = {}
 
           const players = accounts.slice(1, 15)
@@ -189,30 +198,29 @@ const { assert, expect } = require("chai")
             // coded first but executed after event is fired.
             // event listener for WinnerPicked
             lottery.once("WinnerPicked", async () => {
-              console.log("WinnerPicked event fired!")
-              // assert throws an error if it fails, so we need to wrap
-              // it in a try/catch so that the promise returns event
-              // if it fails.
+              console.log("WinnersPicked event fired!")
               try {
                 // Now lets get the ending values...
-                const recentWinner = await lottery.getRecentWinner()
-                const winnersCount = await lottery.getWinnersCount()
-                const winner = await lottery.getWinner(winnersCount.toNumber() - 1) // "'winner' => address | 'amount' => uint256"
+                const winners = await lottery.getWinners()
+                const recentWinner = winners[winners.length - 1]
+                const recentWinnerPrize = await lottery.getWinnerPrize(recentWinner)
                 const winnerAccount = players.find((player) => player.address === recentWinner)
                 const winnerStartingBalance = startingBalances[winnerAccount.address]
                 const winnerBalance = await winnerAccount.getBalance()
                 const lotteryBalance = await lottery.getBalance()
                 const lotteryState = await lottery.getLotteryState()
                 const endingTimeStamp = await lottery.getLatestTimeStamp()
-
+                const currentRound = Number(await lottery.getRound())
                 await expect(lottery.getPlayer(0)).to.be.reverted
 
                 // Comparisons to check if our ending values are correct:
+                assert.equal(winners.length, 1)
                 assert.equal(lotteryState, 1)
                 assert.equal(
                   winnerBalance.toString(),
-                  winnerStartingBalance.add(lotteryStartingBalance).toString()
+                  winnerStartingBalance.add(recentWinnerPrize).toString()
                 )
+                assert.equal(round + 1, currentRound)
                 assert(lotteryBalance.toString() === "0")
                 assert(endingTimeStamp > startingTimeStamp)
                 resolve() // if try passes, resolves the promise
