@@ -114,6 +114,12 @@ const { assert, expect } = require("chai")
           )
         })
 
+        it("state should have update properly", async () => {
+          await lottery.closeLottery()
+          const state = await lottery.state()
+          assert.equal(state, 3)
+        })
+
         it("emits event on close", async () => {
           await expect(lottery.closeLottery()).to.emit(lottery, "LotteryClose")
         })
@@ -148,47 +154,6 @@ const { assert, expect } = require("chai")
           await lottery.updateEntryLimit(limit)
           const entryLimit = await lottery.entryLimit()
           assert.equal(limit, entryLimit)
-        })
-      })
-
-      describe.skip("canPickWinner", () => {
-        it("returns false if people haven't sent any ETH", async () => {
-          lottery = lottery.connect(accounts[0])
-          await lottery.openLottery()
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-          await network.provider.send("evm_mine", [])
-          const { canPick } = await lottery.callStatic.canPickWinner()
-          assert(!canPick)
-        })
-
-        it("returns false if lottery isn't open", async () => {
-          lottery = lottery.connect(accounts[0])
-          const value = await lottery.callStatic.canPickWinner()
-          assert(value === false)
-        })
-
-        it("returns false if time hasn't passed", async () => {
-          lottery = lottery.connect(accounts[0])
-          await lottery.openLottery()
-          await lottery.enterLottery({ value: entranceFee })
-          await network.provider.send("evm_increaseTime", [interval.toNumber() - 1])
-          await network.provider.send("evm_mine", [])
-          const { canRequest } = await lottery.callStatic.canPickWinner()
-          assert(!canRequest)
-        })
-
-        it("returns true if enough time has passed, has players, eth and is open", async () => {
-          lottery = lottery.connect(accounts[0])
-          await lottery.openLottery()
-          for (let index = 1; index <= 11; index++) {
-            lottery = lottery.connect(accounts[index])
-            await lottery.enterLottery({ value: entranceFee })
-          }
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-          await network.provider.request({ method: "evm_mine", params: [] }) // same of line 80, but using request
-          lottery = lottery.connect(accounts[0])
-          const canRequest = await lottery.callStatic.canPickWinner()
-          assert(canRequest === true)
         })
       })
 
