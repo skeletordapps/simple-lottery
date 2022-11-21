@@ -8,7 +8,8 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
   const chainId = network.config.chainId
   const entranceFee = networkConfig[chainId]["entranceFee"]
   const interval = networkConfig[chainId]["interval"]
-  const args = [entranceFee, interval]
+  const entryLimit = networkConfig[chainId]["entryLimit"]
+  const args = [entranceFee, interval, entryLimit]
 
   const lottery = await deploy("Lottery", {
     from: deployer,

@@ -3,16 +3,15 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "hardhat/console.sol";
 
-error Lottery__NotEnoughEthEntered();
+error Lottery__LowEntry();
+error Lottery__ExceedsEntryLimit();
 error Lottery__TransferFailed();
 error Lottery__NotOpen();
 error Lottery__NotClosed();
-error Lottery__NotEnoughBalance();
-error Lottery__PickWinnerNotNeeded(
-  uint256 currentBalance,
-  uint256 numPlayers,
-  uint256 lotteryState
-);
+error Lottery__ZeroFees();
+error Lottery__NotAtDrawPhase();
+error Lottery__PickWinnerNotNeeded(uint256 currentBalance, uint256 numPlayers, uint256 state);
+error Lottery__AlreadyClaimed();
 
 /** @title A lottery contract
  * @author 0xL
@@ -22,92 +21,54 @@ error Lottery__PickWinnerNotNeeded(
 
 contract Lottery is Ownable {
   // Enums
-  enum LotteryState {
+  enum State {
     IDLE,
     OPEN,
+    DRAW,
     CLOSED
   }
 
   // Variables
-  uint256 private immutable i_entranceFee;
-  uint256 private immutable i_interval;
-  uint256 private s_round = 0;
-  uint256 private s_lastTimeStamp;
-  address payable[] private s_players;
-  address payable[] private s_winners;
-  LotteryState private s_lotteryState;
-  mapping(uint256 => mapping(address => uint256)) private s_mapToEntries; // round[n] => address[j] => entries
-  mapping(address => uint256) private s_mapToWinnerPrize; // winner address[n] => uint256 prize
+  uint256 public immutable entranceFee;
+  uint256 public interval;
+  uint256 public entryLimit;
+  uint256 public round;
+  uint256 public lastTimeStamp;
+  uint256 public fees;
+  address payable[] public players;
+  address payable[] public winners;
+  address payable public lastWinner;
+  State public state;
+  mapping(uint256 => mapping(address => uint256)) public mapToEntries; // round[n] => address[j] => entries
+  mapping(address => uint256) public mapToPrize; // winnerAddress[n] => uint256 prize
 
   // Events
   event LotteryOpen();
   event LotteryEnter(address indexed player);
-  event WinnerPicked(address indexed winner);
+  event LotteryDrawPhase();
   event LotteryClose();
-  event WithdrawFunds(address indexed owner, uint256 amount);
+  event WinnerPicked(address indexed winner, uint256 prize);
+  event WithdrawFees(address indexed owner, uint256 amount);
 
-  constructor(uint256 entranceFee, uint256 interval) {
-    i_entranceFee = entranceFee;
-    i_interval = interval;
-    s_lastTimeStamp = block.timestamp;
-  }
-
-  // Lottery functions
+  // Modifiers
 
   /**
-   * @notice Release lottery for new enters
-   */
-  function openLottery() external onlyOwner {
-    s_lotteryState = LotteryState.OPEN;
-    emit LotteryOpen();
-  }
-
-  /**
-   * @notice Pause lottery for new enters
-   */
-  function closeLottery() public onlyOwner {
-    s_lotteryState = LotteryState.CLOSED;
-    emit LotteryClose();
-  }
-
-  /**
-   * @notice Owner can withdraw remaining funds when lottery is closed
-   * @dev Lottery needs to be closed before withdraw
-   */
-  function withdraw() public onlyOwner {
-    if (s_lotteryState != LotteryState.CLOSED) {
-      revert Lottery__NotClosed();
-    }
-
-    if (address(this).balance == 0) {
-      revert Lottery__NotEnoughBalance();
-    }
-
-    uint256 balance = address(this).balance;
-    (bool success, ) = owner().call{value: balance}("");
-    if (!success) {
-      revert Lottery__TransferFailed();
-    }
-
-    emit WithdrawFunds(owner(), balance);
-  }
-
-  /**
-   * @notice User enters the lottery
-   * @dev Don't allows less than entrace fee and lottery needs OPEN state
-   */
-  function enterLottery() public payable {
-    if (msg.value < i_entranceFee) {
-      revert Lottery__NotEnoughEthEntered();
-    }
-
-    if (s_lotteryState != LotteryState.OPEN) {
+   * @dev Min 1 entry, Max set by entryLimit
+   **/
+  modifier onlyWhenCanEnter() {
+    if (state != State.OPEN) {
       revert Lottery__NotOpen();
     }
-
-    s_mapToEntries[s_round][msg.sender]++;
-    s_players.push(payable(msg.sender));
-    emit LotteryEnter(msg.sender);
+    if (msg.value < entranceFee) {
+      revert Lottery__LowEntry();
+    }
+    if (msg.value / entranceFee > entryLimit) {
+      revert Lottery__ExceedsEntryLimit();
+    }
+    if (mapToEntries[round][msg.sender] / entranceFee == entryLimit) {
+      revert Lottery__ExceedsEntryLimit();
+    }
+    _;
   }
 
   /**
@@ -117,111 +78,180 @@ contract Lottery is Ownable {
    * 2. Time interval should have passed
    * 3. The lottery should have more players than winners per round
    * 4. The lottery should have balance enough to split prize between winners
-   */
-  function canRequestAWinner() public view onlyOwner returns (bool canPick) {
-    bool isOpen = (LotteryState.OPEN == s_lotteryState);
-    bool timePassed = block.timestamp > (s_lastTimeStamp + i_interval);
-    // bool hasPlayers = s_players.length > 0;
-    bool hasPlayers = s_players.length > 0;
+   **/
+  modifier onlyWhenCanEnterDrawPhase() {
+    bool isOpen = (State.OPEN == state);
+    bool timePassed = block.timestamp > (lastTimeStamp + interval);
+    bool hasPlayers = players.length > 0;
     bool hasBalance = address(this).balance > 0;
-    canPick = (isOpen && timePassed && hasPlayers && hasBalance);
-    return canPick;
+    bool canEnterDrawPhase = (isOpen && timePassed && hasPlayers && hasBalance);
+    if (!canEnterDrawPhase) {
+      revert Lottery__PickWinnerNotNeeded(address(this).balance, players.length, uint256(state));
+    }
+    _;
+  }
+
+  /**
+   * @dev Needs to be in DRAW state to pick a winner
+   **/
+  modifier onlyWhenCanPickWinner() {
+    if (state != State.DRAW) {
+      revert Lottery__NotAtDrawPhase();
+    }
+    _;
+  }
+
+  /**
+   * @dev Accumulated prize should be > 0
+   **/
+  modifier onlyWhenCanClaim(address payable _winner) {
+    if (mapToPrize[_winner] == 0) {
+      revert Lottery__AlreadyClaimed();
+    }
+    _;
+  }
+
+  /**
+   * @dev Accumulated fee should be > 0
+   **/
+  modifier onlyWhenCanWithdraw() {
+    if (fees == 0) {
+      revert Lottery__ZeroFees();
+    }
+    _;
+  }
+
+  constructor(
+    uint256 _entranceFee,
+    uint256 _interval,
+    uint256 _entryLimit
+  ) {
+    entranceFee = _entranceFee;
+    interval = _interval;
+    entryLimit = _entryLimit;
+    lastTimeStamp = block.timestamp;
+  }
+
+  // Lottery functions
+
+  /**
+   * @notice Release lottery for new enters
+   */
+  function openLottery() external onlyOwner {
+    state = State.OPEN;
+    emit LotteryOpen();
+  }
+
+  /**
+   * * @notice Update lotto to draw phase
+   */
+  function enterDrawPhase() external onlyWhenCanEnterDrawPhase {
+    state = State.DRAW;
+    emit LotteryDrawPhase();
+  }
+
+  /**
+   * @notice Close the lotto
+   */
+  function closeLottery() external onlyOwner {
+    state = State.CLOSED;
+    emit LotteryClose();
+  }
+
+  /**
+   * @notice Update current interval
+   */
+  function updateInterval(uint256 _interval) external onlyOwner {
+    interval = _interval;
+  }
+
+  /**
+   * @notice Update entrance limit
+   */
+  function updateEntryLimit(uint256 _entryLimit) external onlyOwner {
+    entryLimit = _entryLimit;
+  }
+
+  /**
+   * @notice User enters the lottery
+   * @dev Don't allows less than entrace fee and lottery needs OPEN state
+   */
+  function enterLottery() external payable onlyWhenCanEnter {
+    uint256 entries = msg.value / entranceFee;
+    if (mapToEntries[round][msg.sender] == 0) {
+      players.push(payable(msg.sender));
+    }
+    mapToEntries[round][msg.sender] += entries;
+    emit LotteryEnter(msg.sender);
   }
 
   /**
    * @dev Get a random number
    */
   function random() private view returns (uint256) {
-    return uint256(keccak256(abi.encodePacked(block.difficulty, block.timestamp, s_players)));
-  }
-
-  /**
-   * @notice Owner is able to request a winner
-   */
-  function requestWinner() external onlyOwner {
-    bool canRequest = canRequestAWinner();
-    if (!canRequest) {
-      revert Lottery__PickWinnerNotNeeded(
-        address(this).balance,
-        s_players.length,
-        uint256(s_lotteryState)
-      );
-    }
-    s_lotteryState = LotteryState.IDLE;
-    fulfillWinner();
+    return
+      uint256(keccak256(abi.encodePacked(block.difficulty, block.timestamp, (block.number - 10)))); // couldn't test with (- 100), cuz hardhat set up max of 10 accounts.
   }
 
   /**
    * @notice Pick a random winner and send prize
-   * @dev Transfer 80% of the balance to the
-   * winner wallet and 20% to owner wallet
+   * @dev Add/Increase winner pool prize,
+   * Increase accumulated fees, set a new round,
+   * Reopen Lottery
    */
-  function fulfillWinner() internal onlyOwner {
-    uint256 prize = (address(this).balance / 5) * 4;
-    uint256 index = random() % s_players.length;
-    address payable recentWinner = s_players[index];
-    s_winners.push(recentWinner);
-    s_mapToWinnerPrize[recentWinner] = prize;
+  function pickWinner() external onlyWhenCanPickWinner {
+    uint256 prize = (address(this).balance * 4) / 5;
+    uint256 index = random() % players.length;
+    lastWinner = players[index];
+    winners.push(lastWinner);
+    mapToPrize[lastWinner] = prize;
+    fees += address(this).balance - prize;
+    players = new address payable[](0);
+    lastTimeStamp = block.timestamp;
+    round++;
+    state = State.OPEN;
+    emit WinnerPicked(lastWinner, prize);
+    emit LotteryOpen();
+  }
 
-    (bool success, ) = recentWinner.call{value: prize}("");
+  /**
+   * @notice Send prize to winner
+   */
+  function claim(address payable _winner) external payable onlyWhenCanClaim(_winner) {
+    (bool success, ) = _winner.call{value: mapToPrize[_winner]}("");
+    mapToPrize[_winner] = 0;
     if (!success) {
       revert Lottery__TransferFailed();
     }
-    (bool success2, ) = owner().call{value: address(this).balance}("");
-    if (!success2) {
+  }
+
+  /**
+   * @notice 20% fees from entrances goes to Levi Multisign
+   */
+  function withdrawFees() external onlyWhenCanWithdraw {
+    address cacheOwner = owner();
+    uint256 balance = address(this).balance;
+    (bool success, ) = cacheOwner.call{value: fees}("");
+    if (!success) {
       revert Lottery__TransferFailed();
     }
-
-    s_players = new address payable[](0);
-    s_round++; // set a new round
-    s_lotteryState = LotteryState.OPEN;
-    s_lastTimeStamp = block.timestamp;
-
-    emit WinnerPicked(recentWinner);
+    emit WithdrawFees(cacheOwner, balance);
   }
 
-  // View / Pure functions
-  function getRound() public view returns (uint256) {
-    return s_round;
-  }
-
-  function getEntranceFee() public view returns (uint256) {
-    return i_entranceFee;
-  }
-
-  function getLatestTimeStamp() public view returns (uint256) {
-    return s_lastTimeStamp;
-  }
-
-  function getInterval() public view returns (uint256) {
-    return i_interval;
-  }
-
+  // View / Pure functions (Will remove it once we have subgraph)
   function getBalance() public view returns (uint256) {
     return address(this).balance;
   }
 
-  function getLotteryState() public view returns (LotteryState) {
-    return s_lotteryState;
-  }
-
   function getPlayer(uint256 player) public view returns (address) {
-    return s_players[player];
-  }
-
-  function getPlayerEntries(uint256 round, address player) public view returns (uint256) {
-    return s_mapToEntries[round][player];
+    return players[player];
   }
 
   function getNumberOfPlayers() public view returns (uint256) {
-    return s_players.length;
+    return players.length;
   }
 
   function getWinners() public view returns (address payable[] memory) {
-    return s_winners;
-  }
-
-  function getWinnerPrize(address winner) public view returns (uint256) {
-    return s_mapToWinnerPrize[winner];
+    return winners;
   }
 }
