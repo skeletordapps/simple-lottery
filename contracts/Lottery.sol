@@ -10,6 +10,7 @@ error Lottery__NotOpen();
 error Lottery__NotClosed();
 error Lottery__ZeroFees();
 error Lottery__NotAtDrawPhase();
+error Lottery__NewRoundNotNeeded();
 error Lottery__PickWinnerNotNeeded(uint256 currentBalance, uint256 numPlayers, uint256 state);
 error Lottery__AlreadyClaimed();
 
@@ -29,10 +30,10 @@ contract Lottery is Ownable {
   }
 
   // Variables
-  uint256 public immutable entranceFee;
-  uint256 public interval;
-  uint256 public entryLimit;
-  uint256 public round;
+  uint32 public round;
+  uint64 public immutable entranceFee;
+  uint64 public interval;
+  uint64 public entryLimit;
   uint256 public lastTimeStamp;
   uint256 public fees;
   address payable[] public players;
@@ -49,6 +50,7 @@ contract Lottery is Ownable {
   event LotteryClose();
   event WinnerPicked(address indexed winner, uint256 prize);
   event WithdrawFees(address indexed owner, uint256 amount);
+  event PrizeClaimed(address indexed winner, uint256 prize);
 
   // Modifiers
 
@@ -72,18 +74,36 @@ contract Lottery is Ownable {
   }
 
   /**
+   * @dev Check if contract is under conditions to set a new round
+   * The following should be true in order to enable:
+   * 1. The lottery should be in an OPEN state
+   * 2. Time interval should have passed
+   * 3. The lottery should zero players
+   **/
+  modifier onlyWhenCanSetNewRound() {
+    bool isOpen = (State.OPEN == state);
+    bool timePassed = block.timestamp > (lastTimeStamp + interval);
+    bool hasNoPlayers = players.length == 0;
+    bool canSetNewRound = (isOpen && timePassed && hasNoPlayers);
+    if (!canSetNewRound) {
+      revert Lottery__NewRoundNotNeeded();
+    }
+    _;
+  }
+
+  /**
    * @dev Check if contract is under conditions to pick a new Winner
    * The following should be true in order to enable:
    * 1. The lottery should be in an OPEN state
    * 2. Time interval should have passed
-   * 3. The lottery should have more players than winners per round
-   * 4. The lottery should have balance enough to split prize between winners
+   * 3. The lottery should have players
+   * 4. The lottery should have balance greater than accumulated fees
    **/
   modifier onlyWhenCanEnterDrawPhase() {
     bool isOpen = (State.OPEN == state);
     bool timePassed = block.timestamp > (lastTimeStamp + interval);
     bool hasPlayers = players.length > 0;
-    bool hasBalance = address(this).balance > 0;
+    bool hasBalance = address(this).balance > fees;
     bool canEnterDrawPhase = (isOpen && timePassed && hasPlayers && hasBalance);
     if (!canEnterDrawPhase) {
       revert Lottery__PickWinnerNotNeeded(address(this).balance, players.length, uint256(state));
@@ -122,9 +142,9 @@ contract Lottery is Ownable {
   }
 
   constructor(
-    uint256 _entranceFee,
-    uint256 _interval,
-    uint256 _entryLimit
+    uint64 _entranceFee,
+    uint64 _interval,
+    uint64 _entryLimit
   ) {
     entranceFee = _entranceFee;
     interval = _interval;
@@ -143,14 +163,6 @@ contract Lottery is Ownable {
   }
 
   /**
-   * * @notice Update lotto to draw phase
-   */
-  function enterDrawPhase() external onlyWhenCanEnterDrawPhase {
-    state = State.DRAW;
-    emit LotteryDrawPhase();
-  }
-
-  /**
    * @notice Close the lotto
    */
   function closeLottery() external onlyOwner {
@@ -161,14 +173,14 @@ contract Lottery is Ownable {
   /**
    * @notice Update current interval
    */
-  function updateInterval(uint256 _interval) external onlyOwner {
+  function updateInterval(uint64 _interval) external onlyOwner {
     interval = _interval;
   }
 
   /**
    * @notice Update entrance limit
    */
-  function updateEntryLimit(uint256 _entryLimit) external onlyOwner {
+  function updateEntryLimit(uint64 _entryLimit) external onlyOwner {
     entryLimit = _entryLimit;
   }
 
@@ -183,6 +195,19 @@ contract Lottery is Ownable {
     }
     mapToEntries[round][msg.sender] += entries;
     emit LotteryEnter(msg.sender);
+  }
+
+  function setNewRound() external onlyWhenCanSetNewRound {
+    lastTimeStamp = block.timestamp;
+    round++;
+  }
+
+  /**
+   * * @notice Update lotto to draw phase
+   */
+  function enterDrawPhase() external onlyWhenCanEnterDrawPhase {
+    state = State.DRAW;
+    emit LotteryDrawPhase();
   }
 
   /**
@@ -218,20 +243,26 @@ contract Lottery is Ownable {
    * @notice Send prize to winner
    */
   function claim(address payable _winner) external payable onlyWhenCanClaim(_winner) {
-    (bool success, ) = _winner.call{value: mapToPrize[_winner]}("");
+    uint256 prize = mapToPrize[_winner];
     mapToPrize[_winner] = 0;
+    (bool success, ) = _winner.call{value: prize}("");
+
     if (!success) {
       revert Lottery__TransferFailed();
     }
+
+    emit PrizeClaimed(_winner, prize);
   }
 
   /**
    * @notice 20% fees from entrances goes to Levi Multisign
    */
   function withdrawFees() external onlyWhenCanWithdraw {
+    uint256 availableFees = fees;
+    fees = 0;
     address cacheOwner = owner();
     uint256 balance = address(this).balance;
-    (bool success, ) = cacheOwner.call{value: fees}("");
+    (bool success, ) = cacheOwner.call{value: availableFees}("");
     if (!success) {
       revert Lottery__TransferFailed();
     }
