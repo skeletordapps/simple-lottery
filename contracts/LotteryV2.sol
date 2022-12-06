@@ -129,7 +129,7 @@ contract LotteryV2 {
   /// The user who succesfully call this function gets 1% of the prize pot.
   function selectWinner(uint256 round) external {
     if (round >= getRound()) revert Levi_Lottery_Cant_Select_Winner();
-    if (!isRoundValid(round)) revert Levi_Lottery_Cant_Select_Winner();
+    if (uniqueAccountsInRound[round] < 5) revert Levi_Lottery_Cant_Select_Winner();
     if (roundClosed[round]) revert Levi_Lottery_Cant_Select_Winner();
 
     uint256 etherInThisRound = etherCollectedInRound[round];
@@ -165,7 +165,8 @@ contract LotteryV2 {
 
   /// For invalid rounds it makes sense to the users to be avaiable to get a refund of their ether.
   function getRefund(uint256 round) external {
-    if (isRoundValid(round) || round > getRound()) revert Levi_Lottery_Cannot_Process_Refund();
+    if (round >= getRound()) revert Levi_Lottery_Cannot_Process_Refund();
+    if (uniqueAccountsInRound[round] >= 5) revert Levi_Lottery_Cannot_Process_Refund();
     if (hasClaimedRefund[round][msg.sender]) revert Levi_Lottery_Cannot_Process_Refund();
 
     uint256 amountOfEntries = numberOfEntriesInRoundPerAccount[round][msg.sender];
@@ -182,17 +183,6 @@ contract LotteryV2 {
   /// @notice Returns the current round of the lottery.
   function getRound() public view returns (uint256) {
     return ((block.timestamp - startDate) / interval) + 1;
-  }
-
-  /// A round is invalid if it is equal or greater than the current round
-  /// A round is invalid if it has less than 5 unique players.
-  function isRoundValid(uint256 round) public view returns (bool) {
-    uint256 currentRound = getRound();
-
-    if (round >= currentRound) return false;
-    if (uniqueAccountsInRound[round] < 5) return false;
-
-    return true;
   }
 
   function _random() internal view returns (uint256) {
