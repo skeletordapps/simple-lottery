@@ -2,7 +2,6 @@ const { network, getNamedAccounts, deployments, ethers } = require("hardhat")
 const { developmentChains } = require("../../helper-hardhat-config")
 const { assert, expect } = require("chai")
 const { STAKED_GLP_ABI } = require("../../utils/stakedGlpABI")
-const sleep = require("sleep-promise")
 
 async function increaseTime(value) {
   await ethers.provider.send("evm_increaseTime", [Number(value)])
