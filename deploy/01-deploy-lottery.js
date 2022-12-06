@@ -10,14 +10,12 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
   const interval = networkConfig[chainId]["interval"]
   const entryLimit = networkConfig[chainId]["entryLimit"]
   const args = [entranceFee, interval, entryLimit]
-
   const lottery = await deploy("Lottery", {
     from: deployer,
     args: args,
     log: true,
     waitConfirmations: developmentChains.includes(network.name) ? 1 : 6,
   })
-
   if (
     !developmentChains.includes(network.name) &&
     process.env.ETHERSCAN_API_KEY &&
@@ -26,7 +24,6 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
     log("Verifying...")
     await verify(lottery.address, args)
   }
-
   log("-------------------------------")
 }
 

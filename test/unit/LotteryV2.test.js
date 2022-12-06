@@ -1,6 +1,36 @@
 const { network, getNamedAccounts, deployments, ethers } = require("hardhat")
-const { developmentChains, networkConfig } = require("../../helper-hardhat-config")
+const { developmentChains } = require("../../helper-hardhat-config")
 const { assert, expect } = require("chai")
+const { STAKED_GLP_ABI } = require("../../utils/stakedGlpABI")
+const sleep = require("sleep-promise")
+
+async function increaseTime(value) {
+  await ethers.provider.send("evm_increaseTime", [Number(value)])
+  await ethers.provider.send("evm_mine")
+}
+
+const impersonateAddress = async (address) => {
+  network.provider.request({
+    method: "hardhat_impersonateAccount",
+    params: [address],
+  })
+  const signer = await ethers.provider.getSigner(address)
+  signer.address = signer._address
+  return signer
+}
+
+const getGLPBalance = async (address) => {
+  try {
+    const signer = await impersonateAddress(address)
+    const stakedGlpContract = new ethers.Contract(process.env.STAKED_GLP_CONTRACT_ADDRESS, STAKED_GLP_ABI, signer)
+    const bnBlance = await stakedGlpContract.balanceOf(address)
+
+    return ethers.utils.formatEther(bnBlance)
+  } catch (e) {
+    console.log(e)
+    return "0"
+  }
+}
 
 !developmentChains.includes(network.name)
   ? describe.skip
@@ -116,7 +146,7 @@ const { assert, expect } = require("chai")
             await lottery.enterLottery(1, { value: entryPrice })
           }
 
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
+          await network.provider.send("evm_increaseTime", [Number(interval) + 1])
           await network.provider.send("evm_mine", [])
 
           const valid = await lottery.isRoundValid(round)
@@ -129,7 +159,7 @@ const { assert, expect } = require("chai")
             await lottery.enterLottery(1, { value: entryPrice })
           }
 
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
+          await network.provider.send("evm_increaseTime", [Number(interval) + 1])
           await network.provider.send("evm_mine", [])
           const valid = await lottery.isRoundValid(round)
           assert.equal(valid, true)
@@ -149,7 +179,7 @@ const { assert, expect } = require("chai")
             await lottery.enterLottery(1, { value: entryPrice })
           }
 
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
+          await network.provider.send("evm_increaseTime", [Number(interval) + 1])
           await network.provider.send("evm_mine", [])
 
           await expect(lottery.getRefund(round)).to.be.revertedWith(
@@ -199,11 +229,9 @@ const { assert, expect } = require("chai")
         })
 
         it("revert when is not a valid round", async () => {
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-          await network.provider.send("evm_mine", [])
+          await increaseTime(Number(interval) + 1)
           const newRound = Number((await lottery.getRound()).toString())
-          await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-          await network.provider.send("evm_mine", [])
+          await increaseTime(Number(interval) + 1)
 
           await expect(lottery.selectWinner(newRound)).to.be.revertedWith(
             "Levi_Lottery_Cant_Select_Winner"
@@ -211,9 +239,8 @@ const { assert, expect } = require("chai")
         })
 
         it("revert when round is closed", async () => {
-          for (let index = 0; index < 23; index++) {
-            await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-            await network.provider.send("evm_mine", [])
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
           }
 
           await lottery.selectWinner(round)
@@ -223,18 +250,16 @@ const { assert, expect } = require("chai")
         })
 
         it("emit event when select a winner", async () => {
-          for (let index = 0; index < 23; index++) {
-            await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-            await network.provider.send("evm_mine", [])
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
           }
 
           await expect(lottery.selectWinner(round)).to.emit(lottery, "WinnerSelected")
         })
 
         it("prize, fee and service should be splited correctly", async () => {
-          for (let index = 0; index < 23; index++) {
-            await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-            await network.provider.send("evm_mine", [])
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
           }
 
           const ethersCollected = await lottery.etherCollectedInRound(round)
@@ -255,7 +280,7 @@ const { assert, expect } = require("chai")
       })
 
       describe("withdraw", () => {
-        let args, expectedPrize, expectedFee, expectedService
+        let args
 
         beforeEach(async () => {
           for (let index = 0; index < 6; index++) {
@@ -263,9 +288,8 @@ const { assert, expect } = require("chai")
             await lottery.enterLottery(5, { value: entryPrice.mul(5) })
           }
 
-          for (let index = 0; index < 23; index++) {
-            await network.provider.send("evm_increaseTime", [interval.toNumber() + 1])
-            await network.provider.send("evm_mine", [])
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
           }
 
           const ethersCollected = await lottery.etherCollectedInRound(round)
@@ -309,6 +333,104 @@ const { assert, expect } = require("chai")
             startServiceBalance.sub(tx2Gasused).add(service).toString(),
             endServiceBalance.toString()
           )
+        })
+      })
+
+      describe("convertEthBalanceIntoGLP", () => {
+        let args, glpContract
+        beforeEach(async () => {
+          for (let index = 0; index < 6; index++) {
+            lottery = lottery.connect(accounts[index])
+            await lottery.enterLottery(5, { value: entryPrice.mul(5) })
+          }
+
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
+          }
+
+          const ethersCollected = await lottery.etherCollectedInRound(round)
+          expectedPrize = ethersCollected.mul(85).div(100)
+          expectedFee = ethersCollected.mul(14).div(100)
+          expectedService = ethersCollected.mul(1).div(100)
+
+          lottery = lottery.connect(accounts[9])
+          const tx = await lottery.selectWinner(round)
+          const txReceipt = await tx.wait(1)
+          args = txReceipt.events[0].args
+        })
+
+        it("emit an event after buy GLP", async () => {
+          await expect(lottery.convertEthBalanceIntoGLP()).to.emit(lottery, "GLPBought")
+        })
+
+        it("Fees should be zeroed after conversion", async () => {
+          const startFees = await lottery.balances(lottery.address)
+          await lottery.convertEthBalanceIntoGLP()
+          const endFees = await lottery.balances(lottery.address)
+
+          expect(Number(startFees.toString())).to.be.greaterThan(0)
+          assert.equal(endFees.toString(), "0")
+        })
+
+        it("Fees should be converted in GLP", async () => {
+          const startFees = await lottery.balances(lottery.address)
+          const startGLPBalance = await getGLPBalance(lottery.address)
+
+          await lottery.convertEthBalanceIntoGLP()
+          const endFees = await lottery.balances(lottery.address)
+          const endGLPBalance = await getGLPBalance(lottery.address)
+
+          expect(Number(startFees.toString())).to.be.greaterThan(0)
+          assert.equal(Number(startGLPBalance.toString()), 0)
+
+          assert.equal(Number(endFees.toString()), 0)
+          expect(Number(endGLPBalance.toString())).to.be.greaterThan(0)
+        })
+      })
+
+      describe("sendGLPToMultisig", () => {
+        let args
+        beforeEach(async () => {
+          for (let index = 0; index < 6; index++) {
+            lottery = lottery.connect(accounts[index])
+            await lottery.enterLottery(5, { value: entryPrice.mul(5) })
+          }
+
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
+          }
+
+          const ethersCollected = await lottery.etherCollectedInRound(round)
+          expectedPrize = ethersCollected.mul(85).div(100)
+          expectedFee = ethersCollected.mul(14).div(100)
+          expectedService = ethersCollected.mul(1).div(100)
+
+          lottery = lottery.connect(accounts[9])
+          const tx = await lottery.selectWinner(round)
+          const txReceipt = await tx.wait(1)
+          args = txReceipt.events[0].args
+          await lottery.convertEthBalanceIntoGLP()
+        })
+
+        it("reverts when just converted to GLP", async () => {
+          await expect(lottery.sendGLPToMultisig()).to.revertedWith("Levi_Lottery_Cannot_Send_GLP")
+        })
+
+        it("emits an event after send GLP to Multisig", async () => {
+          await increaseTime(Number(interval) + 1)
+          await expect(lottery.sendGLPToMultisig()).to.emit(lottery, "GLPSent")
+        })
+
+        it("multisig should receive the glp converted", async () => {
+          await increaseTime(Number(interval) + 1)
+          const startLotteryGLPBalance = await getGLPBalance(lottery.address)
+          const startMultisigGLPBalance = await getGLPBalance(deployer)
+          await lottery.sendGLPToMultisig()
+          const endLotteryGLPBalance = await getGLPBalance(lottery.address)
+          const endMultisigGLPBalance = await getGLPBalance(deployer)
+
+          assert.equal(startLotteryGLPBalance.toString(), endMultisigGLPBalance.toString())
+          assert.equal(startMultisigGLPBalance.toString(), endLotteryGLPBalance.toString())
         })
       })
     })

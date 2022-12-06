@@ -1,14 +1,19 @@
 const { network } = require("hardhat")
-const { developmentChains } = require("../helper-hardhat-config")
+const { developmentChains, networkConfig } = require("../lottery-v2-helper-hardhat-config")
 const { verify } = require("../utils/verify")
 
 module.exports = async function ({ getNamedAccounts, deployments }) {
   const { deploy, log } = deployments
   const { deployer } = await getNamedAccounts()
+  const chainId = network.config.chainId
+  const multisig = developmentChains.includes(network.name)
+    ? deployer
+    : networkConfig[chainId]["multisig"].toString()
+  const args = [multisig]
 
-  const lottery = await deploy("LotteryV2", {
+  const lotteryV2 = await deploy("LotteryV2", {
     from: deployer,
-    args: [],
+    args: args,
     log: true,
     waitConfirmations: developmentChains.includes(network.name) ? 1 : 6,
   })
@@ -19,7 +24,7 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
     process.env.ARBISCAN_API_KEY
   ) {
     log("Verifying...")
-    await verify(lottery.address, args)
+    await verify(lotteryV2.address, args)
   }
 
   log("-------------------------------")

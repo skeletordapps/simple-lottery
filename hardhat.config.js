@@ -14,6 +14,7 @@ const DEPLOYER_ARBITRUM_PRIVATE_KEY = process.env.DEPLOYER_ARBITRUM_PRIVATE_KEY
 const COINMARKETCAP_API_KEY = process.env.COINMARKETCAP_API_KEY
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY
 const ARBISCAN_API_KEY = process.env.ARBISCAN_API_KEY
+const ALCHEMY_NODE_HTTPS = process.env.ALCHEMY_NODE_HTTPS
 
 module.exports = {
   defaultNetwork: "hardhat",
@@ -24,6 +25,10 @@ module.exports = {
       mining: {
         auto: true,
         interval: [500, 1000],
+      },
+      forking: {
+        url: ALCHEMY_NODE_HTTPS,
+        blockNumber: 43869246,
       },
     },
     goerli: {
