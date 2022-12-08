@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
-import "hardhat/console.sol";
 
 interface StakedGLP {
   function balanceOf(address account) external returns (uint256);
@@ -13,7 +12,7 @@ interface RewardRouter {
 }
 
 contract LotteryV2 {
-  address public constant GMX_REWARD_ROUTER = 0xA906F338CB21815cBc4Bc87ace9e68c87eF8d8F1;
+  address public constant GMX_REWARD_ROUTER = 0xB95DB5B167D75e6d04227CfFFA61069348d271F5;
   address public constant STAKED_GLP = 0x5402B5F40310bDED796c7D0F3FF6683f5C0cFfdf;
   address public immutable MULTISIG;
   uint256 public immutable entryPrice;
@@ -36,7 +35,7 @@ contract LotteryV2 {
   event EntriesBought(
     address indexed account,
     uint256 indexed round,
-    uint256 entries,
+    uint256 accountEntries,
     uint256 payment
   );
   event WinnerSelected(
