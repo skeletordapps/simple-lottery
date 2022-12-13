@@ -311,7 +311,7 @@ const getGLPBalance = async (address) => {
       })
 
       describe("convertEthBalanceIntoGLP", () => {
-        let args, glpContract
+        let args
         beforeEach(async () => {
           for (let index = 0; index < 6; index++) {
             lottery = lottery.connect(accounts[index])
