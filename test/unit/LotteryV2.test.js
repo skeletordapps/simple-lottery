@@ -344,65 +344,22 @@ const getGLPBalance = async (address) => {
           assert.equal(endFees.toString(), "0")
         })
 
-        it("Fees should be converted in GLP", async () => {
-          const startFees = await lottery.balances(lottery.address)
-          const startGLPBalance = await getGLPBalance(lottery.address)
-
-          await lottery.convertEthBalanceIntoGLP()
-          const endFees = await lottery.balances(lottery.address)
-          const endGLPBalance = await getGLPBalance(lottery.address)
-
-          expect(Number(startFees.toString())).to.be.greaterThan(0)
-          assert.equal(Number(startGLPBalance.toString()), 0)
-
-          assert.equal(Number(endFees.toString()), 0)
-          expect(Number(endGLPBalance.toString())).to.be.greaterThan(0)
-        })
-      })
-
-      describe("sendGLPToMultisig", () => {
-        let args
-        beforeEach(async () => {
-          for (let index = 0; index < 6; index++) {
-            lottery = lottery.connect(accounts[index])
-            await lottery.enterLottery(5, { value: entryPrice.mul(5) })
-          }
-
-          for (let index = 0; index < 33; index++) {
-            await increaseTime(Number(interval) + 1)
-          }
-
-          const ethersCollected = await lottery.etherCollectedInRound(round)
-          expectedPrize = ethersCollected.mul(85).div(100)
-          expectedFee = ethersCollected.mul(14).div(100)
-          expectedService = ethersCollected.mul(1).div(100)
-
-          lottery = lottery.connect(accounts[9])
-          const tx = await lottery.selectWinner(round)
-          const txReceipt = await tx.wait(1)
-          args = txReceipt.events[0].args
-          await lottery.convertEthBalanceIntoGLP()
-        })
-
         it("reverts when just converted to GLP", async () => {
-          await expect(lottery.sendGLPToMultisig()).to.revertedWith("Levi_Lottery_Cannot_Send_GLP")
-        })
-
-        it("emits an event after send GLP to Multisig", async () => {
-          await increaseTime(Number(interval) + 1)
-          await expect(lottery.sendGLPToMultisig()).to.emit(lottery, "GLPSent")
+          await lottery.convertEthBalanceIntoGLP()
+          await expect(lottery.convertEthBalanceIntoGLP()).to.revertedWith(
+            "RewardRouter: invalid msg.value"
+          )
         })
 
         it("multisig should receive the glp converted", async () => {
           await increaseTime(Number(interval) + 1)
-          const startLotteryGLPBalance = await getGLPBalance(lottery.address)
           const startMultisigGLPBalance = await getGLPBalance(deployer)
-          await lottery.sendGLPToMultisig()
-          const endLotteryGLPBalance = await getGLPBalance(lottery.address)
+          await lottery.convertEthBalanceIntoGLP()
           const endMultisigGLPBalance = await getGLPBalance(deployer)
 
-          assert.equal(startLotteryGLPBalance.toString(), endMultisigGLPBalance.toString())
-          assert.equal(startMultisigGLPBalance.toString(), endLotteryGLPBalance.toString())
+          expect(Number(endMultisigGLPBalance.toString())).to.be.greaterThan(
+            Number(startMultisigGLPBalance.toString())
+          )
         })
       })
     })
