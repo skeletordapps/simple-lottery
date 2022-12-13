@@ -28,7 +28,8 @@ const getGLPBalance = async (address) => {
     )
     const bnBlance = await stakedGlpContract.balanceOf(address)
 
-    return ethers.utils.formatEther(bnBlance)
+    return bnBlance
+    // return ethers.utils.formatEther(bnBlance)
   } catch (e) {
     console.log(e)
     return "0"
@@ -38,11 +39,12 @@ const getGLPBalance = async (address) => {
 !developmentChains.includes(network.name)
   ? describe.skip
   : describe("LotteryV2 Unit Tests", () => {
-      let lottery, entryPrice, deployer, interval, accounts, round
+      let lottery, entryPrice, deployer, interval, accounts, round, multisig
 
       beforeEach(async () => {
         accounts = await ethers.getSigners()
         deployer = (await getNamedAccounts()).deployer
+        multisig = deployer
         await deployments.fixture(["all"])
 
         lottery = await ethers.getContract("LotteryV2", deployer)
@@ -353,10 +355,21 @@ const getGLPBalance = async (address) => {
 
         it("multisig should receive the glp converted", async () => {
           await increaseTime(Number(interval) + 1)
+          const startFeesBalance = await lottery.balances(lottery.address)
           const startMultisigGLPBalance = await getGLPBalance(deployer)
-          await lottery.convertEthBalanceIntoGLP()
-          const endMultisigGLPBalance = await getGLPBalance(deployer)
 
+          const tx = await lottery.convertEthBalanceIntoGLP()
+          const txReceipt = await tx.wait(1)
+          args = txReceipt.events[txReceipt.events.length - 1].args
+
+          const beneficiary = args["beneficiary"]
+          const glpBought = args["glpBought"]
+          const amountEthConverted = args["amountEthConverted"]
+
+          const endMultisigGLPBalance = await getGLPBalance(deployer)
+          assert.equal(beneficiary, multisig)
+          assert.equal(amountEthConverted.toString(), startFeesBalance.toString())
+          assert.equal(glpBought.toString(), endMultisigGLPBalance.toString())
           expect(Number(endMultisigGLPBalance.toString())).to.be.greaterThan(
             Number(startMultisigGLPBalance.toString())
           )
