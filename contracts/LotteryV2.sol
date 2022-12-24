@@ -45,7 +45,6 @@ contract LotteryV2 {
     uint256 fee,
     uint256 service
   );
-  event GLPSent(address indexed sender, address indexed beneficiary, uint256 glpSent);
   event GLPBought(
     address indexed sender,
     address indexed beneficiary,
