@@ -58,16 +58,18 @@ contract LotteryV2 {
   error Levi_Lottery_Cannot_Process_Refund();
   error Levi_Lottery_Cant_Select_Winner();
   error Levi_Lottery_Cannot_Send_GLP();
+  error Levi_Lottery_No_Big_Mac();
 
   constructor(address _multisig) {
     MULTISIG = _multisig;
-    entryPrice = 0.001 ether;
+    entryPrice = 0.01 ether;
     interval = 3 days;
     startDate = block.timestamp;
   }
 
   /// Any user can convert collected fees in GLP and send them to multisig.
   function convertEthBalanceIntoGLP() external {
+    if (msg.sender != tx.origin) revert Levi_Lottery_No_Big_Mac();
     uint256 ethBalance = balances[address(this)];
     balances[address(this)] = 0;
     uint256 glpBalanceBefore = StakedGLP(STAKED_GLP).balanceOf(address(this));
@@ -87,8 +89,9 @@ contract LotteryV2 {
 
   /// Function where any user can buy up to 5 entries to the lottery.
   function enterLottery(uint256 amountEntries) external payable {
+    if (msg.sender != tx.origin) revert Levi_Lottery_No_Big_Mac();
     if (msg.value != (amountEntries * entryPrice)) revert Levi_Lottery_Insufficient_Ether();
-    if (amountEntries > 5 || amountEntries == 0) revert Levi_Lottery_Invalid_Amount_Entries();
+    if (amountEntries > 10 || amountEntries == 0) revert Levi_Lottery_Invalid_Amount_Entries();
 
     uint256 round = getRound();
 
@@ -117,6 +120,7 @@ contract LotteryV2 {
   /// Any user can call this function for any round that have not been closed
   /// The user who succesfully call this function gets 1% of the prize pot.
   function selectWinner(uint256 round) external {
+    if (msg.sender != tx.origin) revert Levi_Lottery_No_Big_Mac();
     if (round >= getRound()) revert Levi_Lottery_Cant_Select_Winner();
     if (uniqueAccountsInRound[round] < 5) revert Levi_Lottery_Cant_Select_Winner();
     if (roundClosed[round]) revert Levi_Lottery_Cant_Select_Winner();
@@ -142,6 +146,7 @@ contract LotteryV2 {
   }
 
   function withdraw() external {
+    if (msg.sender != tx.origin) revert Levi_Lottery_No_Big_Mac();
     uint256 balance = balances[msg.sender];
 
     balances[msg.sender] = 0;
@@ -154,6 +159,7 @@ contract LotteryV2 {
 
   /// For invalid rounds it makes sense to the users to be avaiable to get a refund of their ether.
   function getRefund(uint256 round) external {
+    if (msg.sender != tx.origin) revert Levi_Lottery_No_Big_Mac();
     if (round >= getRound()) revert Levi_Lottery_Cannot_Process_Refund();
     if (uniqueAccountsInRound[round] >= 5) revert Levi_Lottery_Cannot_Process_Refund();
     if (hasClaimedRefund[round][msg.sender]) revert Levi_Lottery_Cannot_Process_Refund();

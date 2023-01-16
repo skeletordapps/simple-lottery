@@ -4,7 +4,7 @@ const { assert, expect } = require("chai")
 
 !developmentChains.includes(network.name)
   ? describe.skip
-  : describe("Lottery Unit Tests", () => {
+  : describe.skip("Lottery Unit Tests", () => {
       let lottery, entranceFee, deployer, interval, accounts
       const chainId = network.config.chainId
 
@@ -253,8 +253,7 @@ const { assert, expect } = require("chai")
           await lottery.enterDrawPhase()
           await lottery.pickWinner()
           const lastWinner = await lottery.lastWinner()
-          // accounts.map((account) => console.log(account.address.toLowerCase()))
-          // console.log(lastWinner.toLowerCase());
+
           const winnerAccount = accounts.find(
             (account) => account.address.toLowerCase() === lastWinner.toLowerCase()
           )

@@ -39,7 +39,7 @@ const getGLPBalance = async (address) => {
 !developmentChains.includes(network.name)
   ? describe.skip
   : describe("LotteryV2 Unit Tests", () => {
-      let lottery, entryPrice, deployer, interval, accounts, round, multisig
+      let lottery, entryPrice, deployer, interval, accounts, round, multisig, fakeLotto
 
       beforeEach(async () => {
         accounts = await ethers.getSigners()
@@ -51,6 +51,9 @@ const getGLPBalance = async (address) => {
         entryPrice = await lottery.entryPrice()
         interval = await lottery.interval()
         round = Number((await lottery.getRound()).toString())
+
+        const FakeLotto = await ethers.getContractFactory("LotteryV2FakeSender", deployer)
+        fakeLotto = await FakeLotto.deploy(lottery.address, { value: entryPrice.mul(10) })
       })
 
       describe("constructor", () => {
@@ -78,10 +81,14 @@ const getGLPBalance = async (address) => {
           )
         })
 
-        it("revert with more than 5 entries", async () => {
-          await expect(lottery.enterLottery(6, { value: entryPrice.mul(6) })).to.be.revertedWith(
+        it("revert with more than 10 entries", async () => {
+          await expect(lottery.enterLottery(11, { value: entryPrice.mul(11) })).to.be.revertedWith(
             "Levi_Lottery_Invalid_Amount_Entries"
           )
+        })
+
+        it("revert when is a contract", async () => {
+          await expect(fakeLotto.enter()).to.be.revertedWith("Levi_Lottery_No_Big_Mac")
         })
 
         it("[uniqueAccountsInRound] - dont store same account as unique", async () => {
@@ -169,6 +176,10 @@ const getGLPBalance = async (address) => {
           )
         })
 
+        it("revert when a contract tries to be refunded", async () => {
+          await expect(fakeLotto.refundMe(1)).to.be.revertedWith("Levi_Lottery_No_Big_Mac")
+        })
+
         it("refund user when round is invalid", async () => {
           const entries = 3
           acc = accounts[1]
@@ -221,6 +232,14 @@ const getGLPBalance = async (address) => {
           await expect(lottery.selectWinner(round)).to.be.revertedWith(
             "Levi_Lottery_Cant_Select_Winner"
           )
+        })
+
+        it("revert select winner when is a contract", async () => {
+          for (let index = 0; index < 33; index++) {
+            await increaseTime(Number(interval) + 1)
+          }
+
+          await expect(fakeLotto.pickWinner(1)).to.be.revertedWith("Levi_Lottery_No_Big_Mac")
         })
 
         it("emit event when select a winner", async () => {
@@ -277,6 +296,10 @@ const getGLPBalance = async (address) => {
           args = txReceipt.events[0].args
         })
 
+        it("revert withdraw when is a contract", async () => {
+          await expect(fakeLotto.claim()).to.be.revertedWith("Levi_Lottery_No_Big_Mac")
+        })
+
         it("let accounts with balance to withdraw", async () => {
           const { winner, serviceProvider, prize, fee, service } = args
 
@@ -331,6 +354,10 @@ const getGLPBalance = async (address) => {
           const tx = await lottery.selectWinner(round)
           const txReceipt = await tx.wait(1)
           args = txReceipt.events[0].args
+        })
+
+        it("revert conversion when is a contract", async () => {
+          await expect(fakeLotto.convert()).to.be.revertedWith("Levi_Lottery_No_Big_Mac")
         })
 
         it("emit an event after buy GLP", async () => {
